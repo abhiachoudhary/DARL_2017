@@ -1,0 +1,303 @@
+---
+title: 'DARL Example Notebook: <br />Data Analytics Fun with the Iris Dataset in R'
+author: "John S. Erickson (editor)"
+subtitle: Data Analytics Research Lab (DARL) (Fall 2017)
+output:
+  pdf_document: default
+  html_document: default
+  ioslides_presentation: null
+  beamer_presentation: null
+  slidy_presentation: null
+  word_document: null
+---
+
+```{r, eval=FALSE, echo=FALSE}
+# install.packages("caret") #installation of e1071 might be necessary!
+# install.packages("ggplot2")
+# install.packages("devtools")
+require(devtools)
+install_git("git://github.com/vqv/ggbiplot")
+
+```
+# Overview
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. Execute chunks by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+The content of this tutorial is based in part on [*Computing and Visualizing PCA in R*](http://bit.ly/2vxpnQP) by [Thiago G. Martins](https://tgmstat.wordpress.com/). We also use example code from [this StackExchange article.](http://bit.ly/2wJz9Oc)
+
+# Introduction
+
+* This notebook is a multi-faceted tutorial focusing on methods for analyzing the classic `iris` dataset. The data contain four continuous variables which correspond to physical measures of flowers, and a categorical variable describing the flowers’ species.
+
+* In later sections of this notebook we've modified the standard data to demonstrate the need for scaling before applying principle component analysis (PCA)
+
+* The second half of this tutorial demonstrates how to apply and visualize PCA in R. There are many packages and functions that can apply PCA in R; here, we use the function `prcomp` from the `stats` package. 
+    * "For completeness"" we begin by showing how to visualize PCA in R using  "Base R" graphics. 
+    * However, our preferred visualization function for PCA is `ggbiplot`, which is implemented by [Vince Q. Vu](http://www.vince.vu/software/#ggbiplot) and available through [github](https://github.com/vqv/ggbiplot). Some examples from [StackExchange](http://bit.ly/2wJz9Oc) are also included. 
+
+# Exploring the `iris` Dataset
+
+As noted, this tutorial focuses on the classic `iris` dataset. The data contain four continuous variables which corresponds to physical measures of flowers and a categorical variable describing the flowers’ species.
+
+```{r}
+# Load data
+data(iris)
+myIris <- iris 
+head(myIris, 3)
+
+```
+
+# Sometimes we need to scale our data...
+
+[*The following is based on an example from StackExchange:*](http://bit.ly/2wJz9Oc) 
+
+* The `iris` data set is great for illustrating data analysis techniques including PCA. That said, the first four columns describing length and width of sepals and petals as given are not an example of strongly skewed data. Therefore, *log-transforming the standard data does not change the results much, since the resulting rotation of the principal components is erlatively unchanged by log-transformation. * In other situations log-transformation can be a good choice.
+
+* We perform PCA to gain insight into the general structure of a data set. We need to center, scale and sometimes log-transform our data to filter off some trivial effects which could dominate our PCA. The algorithm of a PCA will in turn find the rotation of each PC to minimize the squared residuals, namely the sum of squared perpendicular distances from any sample to the PCs. Large values tend to have high leverage.
+
+# Strategy for adding outliers to the `iris` data
+
+* *Our plan is to inject two new samples into the iris data:*
+    * One flower (*setosa gigantica*) with 430 cm petal length 
+    * A second flower (*virginica brevis*) with petal length of 0.0043 cm. 
+* Both of these flowers are very abnormal, being 100 times larger and 1000 times smaller than "average"" examples. 
+* The leverage of the first flower is huge, such that the first PCs will mostly describe the differences between the large flower and any other flower. This means that *clustering of species will not be possible due to that one outlier.* 
+* If we log-transform our data, the absolute value should now describe the relative variation. The small flower becomes the most abnormal one, but it will still be possible to contain all samples in one figure and to provide a "fair"" clustering of the species. 
+
+# Code for adding samples to the `iris` data
+
+We'll use the following code to modify the `iris` data: 
+
+```{r}
+#add two new observations from two new species to iris data
+levels(myIris[,5]) = c(levels(myIris[,5]),"setosa_gigantica","virginica_brevis")
+myIris[151,] = list(6, 3, 430, 1.5, "setosa_gigantica") # a big flower
+myIris[152,] = list(6, 3, .0043, 1.5, "virginica_brevis") # a small flower
+
+summary(myIris)
+
+```
+Notice the new Min and Max values for `Petal.Length`.
+
+# Simple data exploration with the modifed data
+
+Let's first generate a simple *scatter plot*, plotting `Petal.Length` vs. `Petal.Width`:
+```{r}
+plot(myIris$Petal.Length, myIris$Petal.Width, main="Edgar Anderson's Iris Data")
+```
+That's pretty ugly! Let's generated the same plot, but coloring by species:
+```{r}
+plot(myIris$Petal.Length, myIris$Petal.Width, pch=21, bg=c("red","green3","blue","black","orange")[unclass(myIris$Species)], main="Edgar Anderson's Iris Data (hacked)")
+```
+
+To see the effects of our exceptional flowers, let's look at the unmodified iris data:
+```{r}
+plot(iris$Petal.Length, iris$Petal.Width, pch=21, bg=c("red","green3","blue")[unclass(iris$Species)], main="Edgar Anderson's Iris Data (original)")
+```
+
+## Pairs Scatter Plots
+How do the variables behave in relation to each other? We could generate each plot individually, but there is quicker way, using the `pairs` command on the first four columns:
+
+```{r}
+pairs(myIris[1:4], main = "Edgar Anderson's Iris Data (hacked)", pch = 21, bg = c("red", "green3", "blue", "black", "orange")[unclass(myIris$Species)])
+```
+
+Notice that the panels are mirrored around the diagonal axis. We can create a custom R function `panel.pearson` to draw something else for the upper panels, such as the *Pearson's Correlation*:
+```{r}
+panel.pearson <- function(x, y, ...) {
+  horizontal <- (par("usr")[1] + par("usr")[2]) / 2; 
+  vertical <- (par("usr")[3] + par("usr")[4]) / 2; 
+  text(horizontal, vertical, format(abs(cor(x,y)), digits=2)) 
+}
+
+pairs(myIris[1:4], main="Edgar Anderson's Iris Data (hacked)", pch = 21, bg = c("red", "green3", "blue", "black", "orange")[unclass(myIris$Species)], upper.panel=panel.pearson)
+```
+
+Let's calculate a simple *linear regression* based on this skewed data:
+```{r}
+fit <- lm(Petal.Width ~ Petal.Length, data=myIris)
+
+# show results
+summary(fit) 
+```
+Hmmm, that looks pretty ugly...let's generate some "diagnostic plots" to better understand our model:
+
+```{r}
+par(mfrow=c(2,2))
+plot(fit)
+
+```
+
+We can see the adverse effects of our outliers. 
+
+Now let's plot a linear regression, including confidence and prediction intervals. Notice how we layer on a key. 
+
+```{r}
+plot(Petal.Width ~ Petal.Length, col=c("black", "red", "blue", "green", "yellow")[Species], pch=(15:19)[Species], xlab="Petal Length (cm)", ylab="Petal Width (cm)", data=myIris)
+newx <- data.frame(Petal.Length=seq(min(myIris$Petal.Length), max(myIris$Petal.Length), length.out=100))
+conf.interval <- predict(fit, newdata=newx, interval="confidence")
+pred.interval <- predict(fit, newdata=newx, interval="prediction")
+lines(conf.interval[, "fit"] ~ newx[, 1], lty=1, lw=3)
+lines(conf.interval[, "lwr"] ~ newx[, 1], lty=2)
+lines(conf.interval[, "upr"] ~ newx[, 1], lty=2)
+lines(pred.interval[, "lwr"] ~ newx[, 1], lty=3)
+lines(pred.interval[, "upr"] ~ newx[, 1], lty=3)
+legend("topleft", legend=c(levels(myIris$Species), "CI", "PI"), col=c("black", "red", "blue", "green", "orange", "black", "black"), pch=c(15:19, -1, -1), lty=c(-1, -1, -1, -1, -1, 2, 3))
+```
+
+This is not very promising; we can see that it is difficult to create a linear model without dropping our "exceptional" flowers. But we'll press on and perform multiple regression anyways...
+
+```{r}
+fit2 <- lm(Petal.Width ~ Petal.Length + Sepal.Length + Sepal.Width, data=myIris)
+
+# show our results as a table
+summary(fit2) 
+
+```
+
+Now we'll check the relationship between our models using `ANOVA`:
+```{r}
+anova(fit, fit2)
+```
+
+We can now calculate interaction terms:
+```{r}
+fit2int <- lm(Petal.Width ~ Petal.Length + Sepal.Length + Sepal.Width + Petal.Length:Sepal.Length, data=myIris)
+anova(fit2, fit2int)
+```
+
+
+# Computing the Principal Components
+
+Our overall objective is to apply PCA to the four continuous variables and use the categorical variable `Species` to visualize the principal components later. Prior to log scaling, let's examine our PCA on the un-scaled data:
+
+```{r}
+#Plotting scores of PC1 and PC" without log transformation
+plot(prcomp(iris[,-5],cen=T,sca=T)$x[,1:2],col=iris$Spec)
+
+```
+
+
+In the following code we apply a log transformation to the continuous variables as suggested by <a href="#cite_1">[1]</a> and set center and scale equal to `TRUE` in the call to `prcomp` to standardize the variables prior to the application of PCA:
+
+```{r}
+# log transform 
+log.ir <- log(iris[, 1:4])
+ir.species <- iris[, 5]
+ 
+# apply PCA - scale. = TRUE is highly 
+# advisable, but default is FALSE. 
+ir.pca <- prcomp(log.ir,
+                 center = TRUE,
+                 scale. = TRUE) 
+
+```
+
+Since "skewness" and the magnitude of the variables influence the resulting princpal components, it is good practice to apply a *skewness transformation* to center and scale the variables prior to the application of PCA. In our example above, we applied a log transformation to the variables but we could have been more general and applied a **Box-Cox transformation** <a href="#cite_1">[2]</a>. At the end of this tutorial we show how to perform all of these transformations and then apply PCA with a single one call to the `preProcess` function of the `caret` package.
+
+# Analyzing the Results
+
+The `prcomp` function returns an object of class `prcomp`, which has some methods available to help interpret our results. The `print` method returns the standard deviation of each of the four principal components and their rotation (or "loadings""), which are the coefficients of the linear combinations of the continuous variables.
+
+```{r}
+# print method
+print(ir.pca)
+
+```
+
+The `plot` method for the `prcomp` class returns a *scree plot* showing the variances (y-axis) associated with the PCs (x-axis). The figure below helps us decide how many PCs to retain for further analysis. In this simple case with only four PCs this is not hard; we can clearly see that the first two PCs explain most of the variability in the data.
+
+```{r}
+# plot method
+plot(ir.pca, type = "l")
+
+```
+
+The `summary` method describes the importance of the PCs. 
+* The first row describes the *standard deviation* associated with each PC.
+* The second row shows the *proportion of the variance* in the data explained by each component.
+* The third row described the *cumulative proportion* of explained variance. We can see there that the first two PCs account for more than {95\%} of the variance of the data.
+
+```{r}
+# summary method
+summary(ir.pca)
+
+```
+
+We can node use the `predict` function to predict PCs from new data. For example, let's pretend the last two rows of the `iris` data has just arrived and we want to evaluate their principal component values:
+
+```{r}
+# Predict PCs
+predict(ir.pca,  newdata=tail(log.ir, 2))
+
+```
+The code block below generates a biplot of our PCA using the `ggbiplot` function from the `ggbiplot` package, available through [github](https://github.com/vqv/ggbiplot) .
+
+```{r}
+#require(devtools)
+#install_git("git://github.com/vqv/ggbiplot")
+ 
+require(ggbiplot)
+g <- ggbiplot(ir.pca, obs.scale = 1, var.scale = 1, 
+              groups = ir.species, ellipse = TRUE, 
+              circle = TRUE)
+g <- g + scale_color_discrete(name = '')
+g <- g + theme(legend.direction = 'horizontal', 
+               legend.position = 'top')
+print(g)
+
+```
+
+This plot projects the data on the first two PCs. Other PCs may be chosen through the arguments to the function. The biplot colors each point according to the flowers’ species and draws a Normal contour line with `ellipse.prob` probability (default to {68\%}) for each group. 
+
+Much more info about `ggbiplot` may be obtained by the usual `?ggbiplot` within RStudio. We think you' wi'll agree that the plot produced by ggbiplot is much better than the one produced by the built-in function:
+
+```{r}
+# Plotting PCA using the built-in plot function
+biplot(ir.pca) 
+
+```
+Sometimes it is helpful to plot each variable's coefficients inside a unit circle to help interpret a PCA. Such a figure can be generated by this code, available through this github [gist](https://gist.github.com/thigm85/7689508):
+
+```{r}
+require(ggplot2)
+
+theta <- seq(0,2*pi,length.out = 100)
+circle <- data.frame(x = cos(theta), y = sin(theta))
+p <- ggplot(circle,aes(x,y)) + geom_path()
+
+loadings <- data.frame(ir.pca$rotation, 
+                       .names = row.names(ir.pca$rotation))
+p + geom_text(data=loadings, 
+              mapping=aes(x = PC1, y = PC2, label = .names, colour = .names)) +
+  coord_fixed(ratio=1) +
+  labs(x = "PC1", y = "PC2")
+
+```
+
+# PCA using the `caret` Package
+
+As noted above, we can first apply a *Box-Cox transformation* to correct for skewness to center and scale each variable and then apply PCA with a single call to the `preProcess` function from the `caret` package.
+
+```{r}
+require(caret)
+trans = preProcess(iris[,1:4], method=c("BoxCox", "center", "scale", "pca"))
+PC = predict(trans, iris[,1:4])
+
+```
+By default, `preProcess` only keeps the PCs that are necessary to explain at least *95%* of the variability in the data, but this can be changed through the argument `thresh`.
+
+```{r}
+# Retained PCs
+head(PC, 3)
+```
+
+See [Unsupervised data pre-processing for predictive modeling](http://bit.ly/2vxgSVL) for an introduction of the `preProcess` function.
+
+# References
+<a name="cite_1"></a>
+[1] Venables, W. N., Brian D. R. Modern applied statistics with S-PLUS. Springer-verlag. (Section 11.1)
+
+<a name="cite_2"></a>
+[2] Box, G. and Cox, D. (1964). An analysis of transformations. Journal of the Royal Statistical Society. Series B (Methodological) 211-252
+
